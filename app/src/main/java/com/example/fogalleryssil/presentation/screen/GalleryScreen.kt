@@ -8,7 +8,6 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -27,28 +26,23 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat.startActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
-import coil.ComponentRegistry
-import coil.ImageLoader
 import coil.compose.rememberAsyncImagePainter
-import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
-import coil.request.videoFrameMillis
 import coil.size.Size
 import com.example.fogalleryssil.R
+import com.example.fogalleryssil.presentation.core.PathUtil
 import com.example.fogalleryssil.presentation.screen.model.GalleryModel
 import com.example.fogalleryssil.ui.theme.*
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberPermissionState
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
-import com.google.android.exoplayer2.ui.PlayerView
 import com.google.android.exoplayer2.ui.StyledPlayerView
-
+import com.google.android.exoplayer2.util.MimeTypes
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -58,7 +52,9 @@ fun GalleryScreen(
 ) {
     val context = LocalContext.current
 
-    val loading = viewModel.isLoading.collectAsState()
+    val loading = remember {
+        mutableStateOf(true)
+    }
 
     val allGalleryFiles = viewModel.allFilesFromGallery.collectAsState()
     val allFavoriteFiles = viewModel.favoriteGalleryList.collectAsState()
@@ -66,6 +62,9 @@ fun GalleryScreen(
     val permissionsState =
         rememberPermissionState(permission = Manifest.permission.READ_EXTERNAL_STORAGE)
 
+    val firstStatePermission = remember {
+        mutableStateOf(permissionsState.hasPermission)
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(key1 = lifecycleOwner, effect = {
         val eventObserver = LifecycleEventObserver { _, event ->
@@ -86,6 +85,10 @@ fun GalleryScreen(
         mutableStateOf(true)
     }
 
+    val galleryList =
+        if (isClickAll.value) allGalleryFiles.value else allFavoriteFiles.value
+
+    if (galleryList.isNotEmpty()) loading.value = false
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -96,14 +99,26 @@ fun GalleryScreen(
 
         when {
             permissionsState.hasPermission -> {
-                if (allGalleryFiles.value.isEmpty())
+                if (!firstStatePermission.value) {
                     viewModel.getGalleryInfo()
-                else
-                    GalleryList(
-                        viewModel,
-                        if (isClickAll.value) allGalleryFiles.value else allFavoriteFiles.value,
-                        isClickAll
-                    )
+                    firstStatePermission.value = permissionsState.hasPermission
+                } else {
+                    if (galleryList.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No gallery")
+                        }
+                    } else
+                        GalleryList(
+                            galleryList,
+                            isClickAll,
+                            onClickFavorite = {
+                                viewModel.setGalleryFavorite(it)
+                            }
+                        )
+                }
             }
             permissionsState.shouldShowRationale -> {
                 Column(
@@ -157,9 +172,9 @@ fun LoadingView() {
 
 @Composable
 fun GalleryList(
-    viewModel: GalleryViewModel,
     allGalleryFiles: List<GalleryModel>,
-    isClickAll: MutableState<Boolean>
+    isClickAll: MutableState<Boolean>,
+    onClickFavorite: (Uri) -> Unit
 ) {
     val context = LocalContext.current
     Column {
@@ -201,7 +216,7 @@ fun GalleryList(
                             top = padding_5,
                             bottom = padding_5
                         )
-                        .size(size_180)
+                        .height(size_100)
                 ) {
                     val file = allGalleryFiles[index]
                     val isFavorite = remember {
@@ -233,7 +248,7 @@ fun GalleryList(
                                 .align(Alignment.TopEnd)
                                 .clickable {
                                     if (!isFavorite.value) {
-                                        viewModel.setGalleryFavorite(file.path)
+                                        onClickFavorite(file.path)
                                         isFavorite.value = true
                                     }
                                 }
@@ -256,12 +271,15 @@ fun GalleryList(
 @Composable
 fun VideoView(uri: Uri) {
     val context = LocalContext.current
-    var playWhenReady by remember { mutableStateOf(true) }
+
+    val mediaItem = MediaItem.Builder()
+        .setUri(uri)
+        .build()
+
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
+            setMediaItem(mediaItem)
             repeatMode = ExoPlayer.REPEAT_MODE_ALL
-            playWhenReady = playWhenReady
             prepare()
             play()
         }
@@ -269,7 +287,10 @@ fun VideoView(uri: Uri) {
     DisposableEffect(
         AndroidView(
             modifier = Modifier
-                .clip(RoundedCornerShape(corner_10)),
+                .clip(RoundedCornerShape(corner_10))
+                .background(Color.Black)
+                .height(size_100)
+                .requiredWidthIn(min = size_120),
             factory = {
                 StyledPlayerView(context).apply {
                     player = exoPlayer

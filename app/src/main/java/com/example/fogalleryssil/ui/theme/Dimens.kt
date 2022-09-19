@@ -12,5 +12,6 @@ val corner_10 = 10.dp
 val size_16 = 16.dp
 val size_40 = 40.dp
 val size_100 = 100.dp
+val size_120 = 120.dp
 val size_180 = 180.dp
 

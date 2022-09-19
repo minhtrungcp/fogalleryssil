@@ -1,14 +1,13 @@
 package com.example.fogalleryssil.presentation.screen
 
+import android.Manifest
 import android.app.Application
 import android.content.ContentUris
-import android.graphics.Bitmap
-import android.graphics.ImageDecoder
+import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.provider.MediaStore
-import android.provider.OpenableColumns
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.viewModelScope
 import com.example.fogalleryssil.domain.model.FavoriteGallery
@@ -18,12 +17,13 @@ import com.example.fogalleryssil.presentation.core.BaseViewModel
 import com.example.fogalleryssil.presentation.screen.model.GalleryModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.launch
-import java.io.File
-import java.net.URI
-import java.net.URLConnection
 import javax.inject.Inject
+
 
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
@@ -31,9 +31,6 @@ class GalleryViewModel @Inject constructor(
     private val getFavoriteUseCase: GetFavoriteUseCase,
     private val setFavoriteGalleryUseCase: SetFavoriteGalleryUseCase
 ) : BaseViewModel(application) {
-
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading
 
     private val _allFilesFromGallery: MutableStateFlow<List<GalleryModel>> =
         MutableStateFlow(listOf())
@@ -110,7 +107,6 @@ class GalleryViewModel @Inject constructor(
 
     private fun getGalleryAll() {
         viewModelScope.launch {
-            _isLoading.value = true
             val allGalleryFiles = mutableListOf<GalleryModel>()
 
             val favoriteResult = async { getFavoriteList() }
@@ -128,7 +124,6 @@ class GalleryViewModel @Inject constructor(
                 )
             }
             _allFilesFromGallery.value = allGalleryFiles
-            _isLoading.value = false
         }
     }
 
@@ -141,60 +136,59 @@ class GalleryViewModel @Inject constructor(
         return getFavoriteUseCase.invoke().last()
     }
 
+    private fun checkPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
     private fun getAllFiles(): MutableList<Uri> {
         val allGalleryFiles = mutableListOf<Uri>()
+        if (checkPermission()) {
+            val projection = arrayOf(
+                MediaStore.Files.FileColumns._ID,
+                MediaStore.Files.FileColumns.DATA,
+                MediaStore.Files.FileColumns.DATE_ADDED,
+                MediaStore.Files.FileColumns.MEDIA_TYPE,
+                MediaStore.Files.FileColumns.MIME_TYPE,
+                MediaStore.Files.FileColumns.TITLE
+            )
+            val selection = (MediaStore.Files.FileColumns.MEDIA_TYPE + "="
+                    + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE
+                    + " OR "
+                    + MediaStore.Files.FileColumns.MEDIA_TYPE + "="
+                    + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO)
 
-        val projection = arrayOf(
-            MediaStore.Files.FileColumns._ID,
-            MediaStore.Files.FileColumns.DATA,
-            MediaStore.Files.FileColumns.DATE_ADDED,
-            MediaStore.Files.FileColumns.MEDIA_TYPE,
-            MediaStore.Files.FileColumns.MIME_TYPE,
-            MediaStore.Files.FileColumns.TITLE
-        )
-        val selection = (MediaStore.Files.FileColumns.MEDIA_TYPE + "="
-                + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE
-                + " OR "
-                + MediaStore.Files.FileColumns.MEDIA_TYPE + "="
-                + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO)
-
-        val queryUri = MediaStore.Files.getContentUri("external")
-        val sortOrder = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
-        val cursor = context.contentResolver.query(
-            queryUri,
-            projection,
-            selection,
-            null,
-            sortOrder
-        )
-        cursor.use {
-            it?.let {
-                val idColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
-                while (it.moveToNext()) {
-                    val id = it.getLong(idColumn)
-                    val contentUri = ContentUris.withAppendedId(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        id
-                    )
-                    allGalleryFiles.add(contentUri)
+            val queryUri = MediaStore.Files.getContentUri("external")
+            val sortOrder = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
+            val cursor = context.contentResolver.query(
+                queryUri,
+                projection,
+                selection,
+                null,
+                sortOrder
+            )
+            cursor.use {
+                it?.let {
+                    val idColumn = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+                    val mimeTypeColumn: Int =
+                        it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
+                    while (it.moveToNext()) {
+                        val id = it.getLong(idColumn)
+                        val mimeType = it.getString(mimeTypeColumn)
+                        val contentUri =
+                            ContentUris.withAppendedId(
+                                if (mimeType.contains("video")) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                id
+                            )
+                        allGalleryFiles.add(contentUri)
+                    }
+                } ?: kotlin.run {
+                    Log.e("TAG", "Cursor is null!")
                 }
-            } ?: kotlin.run {
-                Log.e("TAG", "Cursor is null!")
             }
         }
         return allGalleryFiles
-    }
-
-    fun getCapturedImage(selectedPhotoUri: Uri): Bitmap {
-        return when {
-            Build.VERSION.SDK_INT < 28 -> MediaStore.Images.Media.getBitmap(
-                context.contentResolver,
-                selectedPhotoUri
-            )
-            else -> {
-                val source = ImageDecoder.createSource(context.contentResolver, selectedPhotoUri)
-                ImageDecoder.decodeBitmap(source)
-            }
-        }
     }
 }

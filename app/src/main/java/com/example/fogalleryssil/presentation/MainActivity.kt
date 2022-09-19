@@ -27,24 +27,10 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (checkGooglePlayServices()) {
-                        NavHostController()
-                    } else {
-                        Greeting("App can not run because device do not support google play server")
-                    }
+                    NavHostController()
                 }
             }
         }
-    }
-
-    private fun checkGooglePlayServices(): Boolean {
-        val availability = GoogleApiAvailability.getInstance()
-        val resultCode = availability.isGooglePlayServicesAvailable(this)
-        if (resultCode != ConnectionResult.SUCCESS) {
-            availability.getErrorDialog(this, resultCode, 0)?.show()
-            return false
-        }
-        return true
     }
 }
 
