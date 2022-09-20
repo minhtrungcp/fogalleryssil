@@ -281,7 +281,7 @@ fun VideoView(uri: Uri) {
             setMediaItem(mediaItem)
             repeatMode = ExoPlayer.REPEAT_MODE_ALL
             prepare()
-            play()
+//            play()
         }
     }
     DisposableEffect(
